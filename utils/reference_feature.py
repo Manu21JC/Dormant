@@ -3,7 +3,7 @@ import torch
 from typing import Any, Dict, Optional
 from einops import rearrange
 
-from models.attention import BasicTransformerBlock, TemporalBasicTransformerBlock
+from model_lib.models.attention import BasicTransformerBlock, TemporalBasicTransformerBlock
 
 def torch_dfs(model: torch.nn.Module):
     result = [model]

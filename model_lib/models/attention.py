@@ -359,7 +359,6 @@ class TemporalBasicTransformerBlock(nn.Module):
         self.ff = FeedForward(dim, dropout=dropout, activation_fn=activation_fn)
         self.norm3 = nn.LayerNorm(dim)
         self.use_ada_layer_norm_zero = False
-
         # Temp-Attn
         assert unet_use_temporal_attention is not None
         if unet_use_temporal_attention:

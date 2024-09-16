@@ -1,0 +1,13 @@
+pretrained_base_model_path: "./pretrained_weights/stable-diffusion-v1-5"
+pretrained_vae_path: "./pretrained_weights/sd-vae-ft-mse"
+image_encoder_path: "./pretrained_weights/sd-image-variations-diffusers/image_encoder"
+denoising_unet_path: "./pretrained_weights/AnimateAnyone/denoising_unet.pth"
+reference_unet_path: "./pretrained_weights/AnimateAnyone/reference_unet.pth"
+pose_guider_path: "./pretrained_weights/AnimateAnyone/pose_guider.pth"
+motion_module_path: "./pretrained_weights/AnimateAnyone/motion_module.pth"
+appearance_encoder_path: "./pretrained_weights/MagicAnimate/appearance_encoder"
+appearance_control_model_path: "./pretrained_weights/MagicPose/model_state-110000.th"
+
+inference_config: "./configs/inference_v2.yaml"
+appearance_control_config: "./model_lib/ControlNet/cldm_v15_reference_only_pose.yaml"
+weight_dtype: 'fp16'

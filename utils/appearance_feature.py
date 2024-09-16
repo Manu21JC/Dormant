@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 from einops import rearrange
 
 from diffusers.models.attention import BasicTransformerBlock
-from models.magic_attention import BasicTransformerBlock as _BasicTransformerBlock
+from model_lib.models.appearance_attention import BasicTransformerBlock as _BasicTransformerBlock
 
 def torch_dfs(model: torch.nn.Module):
     result = [model]

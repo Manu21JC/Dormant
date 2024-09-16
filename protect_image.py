@@ -12,18 +12,18 @@ from PIL import Image
 from omegaconf import OmegaConf
 from einops import rearrange
 
-from models.unet_2d_condition import UNet2DConditionModel
-from models.unet_3d import UNet3DConditionModel
-from models.pose_guider import PoseGuider
-from models.appearance_encoder import AppearanceEncoderModel
+from model_lib.models.unet_2d_condition import UNet2DConditionModel
+from model_lib.models.unet_3d import UNet3DConditionModel
+from model_lib.models.pose_guider import PoseGuider
+from model_lib.models.appearance_encoder import AppearanceEncoderModel
 from model_lib.ControlNet.ldm.util import instantiate_from_config
 from utils.pgd import linfpgdattack
 from utils.util import img2pose, seed_everything, enable_sequential_cpu_offload
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="./configs/image.yaml")
-    parser.add_argument("--ref_image_path", type=str, default="./anyone-3.png")
+    parser.add_argument("--config", type=str, default="./configs/protect.yaml")
+    parser.add_argument("--ref_image_path", type=str, default="./inputs/000.png")
     parser.add_argument("-W", type=int, default=512)
     parser.add_argument("-H", type=int, default=512)
     parser.add_argument("-L", type=int, default=5)
@@ -35,8 +35,8 @@ def parse_args():
     parser.add_argument("--pgd_steps", type=int, default=200)
     parser.add_argument("--step_size", type=int, default=2)
 
-    parser.add_argument("--output_dir", type=str, default="./output/")
-    parser.add_argument("--gpu_id", type=int, default=2)
+    parser.add_argument("--output_dir", type=str, default="./outputs/")
+    parser.add_argument("--gpu_id", type=int, default=0)
     args = parser.parse_args()
 
     return args
@@ -104,10 +104,10 @@ def main():
         torch.load(config.pose_guider_path, map_location="cpu"),
     )
 
-    appearance_encoder = AppearanceEncoderModel.from_pretrained(config.pretrained_appearance_encoder_path, subfolder="appearance_encoder").to(dtype=weight_dtype, device=device)
+    appearance_encoder = AppearanceEncoderModel.from_pretrained(config.appearance_encoder_path, subfolder="appearance_encoder").to(dtype=weight_dtype, device=device)
 
     appearance_control_model.load_state_dict(
-        torch.load(config.pretrained_appearance_control_model_path, map_location="cpu"), strict=True
+        torch.load(config.appearance_control_model_path, map_location="cpu"), strict=True
     )
 
     # memory efficient

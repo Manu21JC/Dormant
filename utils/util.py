@@ -11,7 +11,7 @@ from diffusers.utils import is_accelerate_available
 from torchvision.transforms import v2 as T
 from typing import Tuple, Union
 
-from dwpose import DWposeDetector
+from model_lib.dwpose import DWposeDetector
 
 def seed_everything(seed):
     generator = torch.manual_seed(seed)
