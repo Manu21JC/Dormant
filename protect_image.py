@@ -18,22 +18,21 @@ from model_lib.models.pose_guider import PoseGuider
 from model_lib.models.appearance_encoder import AppearanceEncoderModel
 from model_lib.ControlNet.ldm.util import instantiate_from_config
 from utils.pgd import linfpgdattack
-from utils.util import img2pose, seed_everything, enable_sequential_cpu_offload
+from utils.util import seed_everything, enable_sequential_cpu_offload, img2pose
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="./configs/protect.yaml")
     parser.add_argument("--ref_image_path", type=str, default="./inputs/000.png")
-    parser.add_argument("-W", type=int, default=512)
-    parser.add_argument("-H", type=int, default=512)
-    parser.add_argument("-L", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=2024)
-    parser.add_argument("--cfg", type=float, default=3.5)
+    parser.add_argument("--W", type=int, default=512)
+    parser.add_argument("--H", type=int, default=512)
+    parser.add_argument("--L", type=int, default=5)
     parser.add_argument("--steps", type=int, default=30)
+    parser.add_argument("--seed", type=int, default=2024)
 
     parser.add_argument("--eps", type=int, default=16)
-    parser.add_argument("--pgd_steps", type=int, default=200)
     parser.add_argument("--step_size", type=int, default=2)
+    parser.add_argument("--pgd_iters", type=int, default=100)
 
     parser.add_argument("--output_dir", type=str, default="./outputs/")
     parser.add_argument("--gpu_id", type=int, default=0)
@@ -92,7 +91,6 @@ def main():
 
     width, height, length = args.W, args.H, args.L
 
-    # load pretrained weights
     denoising_unet.load_state_dict(
         torch.load(config.denoising_unet_path, map_location="cpu"),
         strict=False,
@@ -110,18 +108,17 @@ def main():
         torch.load(config.appearance_control_model_path, map_location="cpu"), strict=True
     )
 
-    # memory efficient
-    #if is_xformers_available():
-    #    reference_unet.enable_xformers_memory_efficient_attention()
-    #    denoising_unet.enable_xformers_memory_efficient_attention()
-    #    appearance_encoder.enable_xformers_memory_efficient_attention() #####
+    if is_xformers_available():
+        reference_unet.enable_xformers_memory_efficient_attention()
+        denoising_unet.enable_xformers_memory_efficient_attention()
+        appearance_encoder.enable_xformers_memory_efficient_attention()
 
     vae.enable_tiling()
 
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    enable_sequential_cpu_offload(image_encoder, vae, reference_unet, pose_guider, device)
+    enable_sequential_cpu_offload(image_encoder, vae, reference_unet, appearance_control_model, device)
 
     pose_guider.requires_grad_(False)
     appearance_control_model.pose_control_model.requires_grad_(False)
@@ -134,7 +131,7 @@ def main():
     )
     ref_image_tensor = ref_image_processor.preprocess(
         ref_image_pil, height=height, width=width
-    )  # (bs, c, width, height) [-1, 1]
+    )
     ref_image_tensor = ref_image_tensor.to(
         dtype=weight_dtype, device=device
     )
@@ -151,9 +148,9 @@ def main():
         pose_cond_tensor = cond_image_processor.preprocess(
             pose_image, height=height, width=width
         )
-        pose_cond_tensor = pose_cond_tensor.unsqueeze(2)  # (bs, c, 1, h, w)
+        pose_cond_tensor = pose_cond_tensor.unsqueeze(2)
         pose_cond_tensor_list.append(pose_cond_tensor)
-    pose_cond_tensor = torch.cat(pose_cond_tensor_list, dim=2)  # (bs, c, t, h, w)
+    pose_cond_tensor = torch.cat(pose_cond_tensor_list, dim=2)
     pose_cond_tensor = pose_cond_tensor.to(
         device=device, dtype=weight_dtype
     )
@@ -165,7 +162,7 @@ def main():
     protect_image_array = 255. * rearrange(protect_image_tensor, 'c h w -> h w c').detach().cpu().numpy()
     protect_image_pil= Image.fromarray(protect_image_array.astype(np.uint8))
 
-    output_name = ref_name + '_eps_' + str(args.eps) + '_steps_' + str(args.pgd_steps) + '_step_size_' + str(args.step_size) + '.png'
+    output_name = ref_name + '_eps_' + str(args.eps) + '_iters_' + str(args.pgd_iters) + '.png'
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     output_path = os.path.join(args.output_dir, output_name)

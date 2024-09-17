@@ -9,5 +9,5 @@ appearance_encoder_path: "./pretrained_weights/MagicAnimate/appearance_encoder"
 appearance_control_model_path: "./pretrained_weights/MagicPose/model_state-110000.th"
 
 inference_config: "./configs/inference_v2.yaml"
-appearance_control_config: "./model_lib/ControlNet/cldm_v15_reference_only_pose.yaml"
+appearance_control_config: "./configs/cldm_v15_reference_only_pose.yaml"
 weight_dtype: 'fp16'

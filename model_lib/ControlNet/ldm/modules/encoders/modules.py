@@ -3,6 +3,8 @@ import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from transformers import T5Tokenizer, T5EncoderModel, CLIPTokenizer, CLIPTextModel
+from transformers import logging
+logging.set_verbosity_error()
 
 import clip
 from model_lib.ControlNet.ldm.util import default, count_params

@@ -2,6 +2,7 @@ import os
 import torch
 import random
 import pynvml
+import gc
 import numpy as np
 
 from einops import rearrange
@@ -20,13 +21,13 @@ def seed_everything(seed):
     random.seed(seed)
     return generator
 
-def enable_sequential_cpu_offload(image_encoder, vae, reference_unet, pose_guider, device):
+def enable_sequential_cpu_offload(image_encoder, vae, reference_unet, appearance_control_model, device):
     if is_accelerate_available():
         from accelerate import cpu_offload
     else:
         raise ImportError("Please install accelerate via `pip install accelerate`")
 
-    for cpu_offloaded_model in [image_encoder, vae, reference_unet, pose_guider]:
+    for cpu_offloaded_model in [image_encoder, vae, reference_unet, appearance_control_model]:
         if cpu_offloaded_model is not None:
             cpu_offload(cpu_offloaded_model, device)
 
@@ -45,6 +46,8 @@ def img2pose(image_pil, device):
     score = np.mean(score, axis=-1)
 
     del detector
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return result
 
@@ -72,7 +75,7 @@ class JPEG(torch.nn.Module):
         return img_tensor
 
 class GaussianNoise(torch.nn.Module):
-    def __init__(self, mean: float = 0.0, sigma: Union[float, Tuple[float, float]] = 0.1, clip=True) -> None:
+    def __init__(self, mean: float = 0.0, sigma: Union[float, Tuple[float, float]] = 0.1, clip: bool = True) -> None:
         super().__init__()
         self.mean = mean
         self.sigma = sigma
@@ -92,10 +95,7 @@ class GaussianNoise(torch.nn.Module):
 def transform(img_tensor):
     img_tensor = (img_tensor + 1) / 2
     width, height = img_tensor.shape[-1], img_tensor.shape[-2]
-    #transform1 = random.choice([T.RandomHorizontalFlip(p=1.0), T.RandomRotation(degrees=5), T.RandomAffine(degrees=0, translate=(0.05, 0)), T.RandomResizedCrop(size=(height, width)), NoTrans()])
-    transform2 = random.choice([T.GaussianBlur(kernel_size=3, sigma=(0.1, 3.0)), JPEG(quality=(30, 70)), GaussianNoise(sigma=(0, 0.03)), torch.nn.Sequential(T.RandomResize(min_size = int(height / 2), max_size = height * 2), T.Resize((height, width))), NoTrans()])
-    #trans = torch.nn.Sequential(transform1, transform2)
-    trans = transform2
+    trans = random.choice([T.GaussianBlur(kernel_size=3, sigma=(0.1, 3.0)), JPEG(quality=(30, 70)), GaussianNoise(sigma=(0, 0.03)), torch.nn.Sequential(T.RandomResize(min_size = int(height / 2), max_size = height * 2), T.Resize((height, width))), NoTrans()])
     img_tensor = trans(img_tensor).clamp(0, 1)
     img_tensor = (img_tensor * 2 - 1).clamp(-1, 1)
     return img_tensor
@@ -114,7 +114,7 @@ def decode_latents(vae, latents):
     video = video.detach().cpu().float().numpy()
     return video
 
-def save_video(images, path="output/output.gif", fps=8):
+def save_video(images, path="outputs/output.gif", fps=8):
     images = rearrange(images, "b c t h w -> t b c h w")
     outputs = []
 

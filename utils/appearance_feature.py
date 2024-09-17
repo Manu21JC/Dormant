@@ -198,7 +198,7 @@ def register_appearance_hooks(
 def get_appearance_features(unet, dtype=torch.float16):
     attn_modules = [
         module
-        for module in torch_dfs(unet) #16
+        for module in torch_dfs(unet)
         #for module in (torch_dfs(unet.mid_block) + torch_dfs(unet.up_blocks))
         if isinstance(module, BasicTransformerBlock)
     ]

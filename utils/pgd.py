@@ -12,7 +12,7 @@ from typing import List
 
 from .reference_feature import register_reference_hooks, get_reference_features, update_reference_features, clear_reference
 from .appearance_feature import register_appearance_hooks, get_appearance_features, clear_appearance
-from .util import decode_latents, save_video, get_memory_cost, transform
+from .util import transform
 
 class linfpgdattack():
     def __init__(self, clip_encoder, vae, denoising_unet, reference_unet, appearance_encoder, appearance_control_model, pose_guider, scheduler, generator, args, clip_min = -1., clip_max = 1.):
@@ -27,16 +27,14 @@ class linfpgdattack():
         self.generator = generator
         self.lpips = lpips.LPIPS(net='vgg').to(dtype=self.denoising_unet.dtype, device=self.denoising_unet.device)
 
-        self.guidance_scale = args.cfg
+        self.guidance_scale = 3.5
         self.do_classifier_free_guidance = self.guidance_scale > 1.0
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.timesteps = self.scheduler.timesteps
         self.width, self.height, self.length= args.W, args.H, args.L
 
-        self.gpu_id = args.gpu_id
-
         self.eps = args.eps / 255.0
-        self.steps = args.pgd_steps
+        self.iters = args.pgd_iters
         self.step_size = args.step_size / 255.0
         self.clip_min = clip_min
         self.clip_max = clip_max
@@ -57,7 +55,7 @@ class linfpgdattack():
                 [uncond_encoder_hidden_states_ori, encoder_hidden_states_ori], dim=0
             )
 
-        ref_image_latents_ori = self.vae.encode(x).latent_dist.mean * 0.18215  # (b, 4, h, w)
+        ref_image_latents_ori = self.vae.encode(x).latent_dist.mean * 0.18215
 
         self.reference_unet(
             ref_image_latents_ori.repeat(
@@ -74,12 +72,11 @@ class linfpgdattack():
         extra_step_kwargs = prepare_extra_step_kwargs(self.scheduler, self.generator)
         text_embeddings = get_text_embeddings(self.appearance_encoder.device, self.do_classifier_free_guidance)
 
+        clear_reference(self.reference_unet)
         del encoder_hidden_states_ori, uncond_encoder_hidden_states_ori
         del self.pose_guider
-        clear_reference(self.reference_unet)
         gc.collect()
         torch.cuda.empty_cache()
-        #get_memory_cost(self.gpu_id, "Get original features")
 
         delta = torch.zeros_like(x)
         delta = nn.Parameter(delta)
@@ -90,7 +87,7 @@ class linfpgdattack():
         decay = 0.5
         momentum = torch.zeros_like(x)
 
-        pbar = tqdm(range(self.steps))
+        pbar = tqdm(range(self.iters))
         for ii in pbar:
             x_adv_trans = transform(x + delta)
             clip_image_embeds = self.clip_encoder(F.interpolate(x_adv_trans, size=(224, 224))).image_embeds
@@ -107,7 +104,6 @@ class linfpgdattack():
             reference_features = get_reference_features(self.reference_unet, self.reference_unet.dtype)
             loss_ref = [F.mse_loss(reference_feature_ori, reference_feature) for reference_feature_ori, reference_feature in zip(reference_features_ori, reference_features)]
             loss_ref = sum(loss_ref) / len(loss_ref)
-            #get_memory_cost(self.gpu_id, "Compute reference feature loss")
 
             latents = randn_tensor((1, self.denoising_unet.config.in_channels, self.length, self.height // self.vae_scale_factor, self.width // self.vae_scale_factor), generator=self.generator, device=self.denoising_unet.device, dtype=self.denoising_unet.dtype)
             latents = latents * self.scheduler.init_noise_sigma
@@ -135,7 +131,6 @@ class linfpgdattack():
             clear_appearance(self.appearance_encoder)
             loss_app = [F.mse_loss(appearance_feature_ori, appearance_feature) for appearance_feature_ori, appearance_feature in zip(appearance_features_ori, appearance_features)]
             loss_app = sum(loss_app) / len(loss_app)
-            #get_memory_cost(self.gpu_id, "Compute appearance feature loss")
 
             appearance_control_features_ori = []
             self.appearance_control_model.appearance_control_model(x=ref_image_latents_ori, hint=None, timesteps=t.unsqueeze(0), context=text_embeddings[-1].unsqueeze(0), attention_bank=appearance_control_features_ori, attention_mode='write', uc=False)
@@ -144,7 +139,6 @@ class linfpgdattack():
             self.appearance_control_model.appearance_control_model(x=ref_image_latents, hint=None, timesteps=t.unsqueeze(0), context=text_embeddings[-1].unsqueeze(0), attention_bank=appearance_control_features, attention_mode='write', uc=False)
             loss_appctrl = [F.mse_loss(appearance_control_feature_ori[0], appearance_control_feature[0]) for appearance_control_feature_ori, appearance_control_feature in zip(appearance_control_features_ori, appearance_control_features)]
             loss_appctrl = sum(loss_appctrl) / len(loss_appctrl)
-            #get_memory_cost(self.gpu_id, "Compute appearance control feature loss")
 
             noise_pred = torch.zeros(
                 (
@@ -187,7 +181,6 @@ class linfpgdattack():
                 noise_pred[:, :, c] = noise_pred[:, :, c] + pred
                 counter[:, :, c] = counter[:, :, c] + 1
 
-            # perform guidance
             if self.do_classifier_free_guidance:
                 noise_pred_uncond, noise_pred_text = (noise_pred / counter).chunk(2)
                 noise_pred = noise_pred_uncond + self.guidance_scale * (
@@ -198,39 +191,31 @@ class linfpgdattack():
                 noise_pred, t, latents, **extra_step_kwargs
             ).pred_original_sample
 
-            #if ii == self.steps - 1:
-            #    images = decode_latents(self.vae, latents)
-            #    save_video(images)
-            #    del images
-
             del noise_pred, counter, context, latent_model_input, latent_pose_input, pred, noise_pred_uncond, noise_pred_text
             gc.collect()
             torch.cuda.empty_cache()
-            #get_memory_cost(self.gpu_id, "Get denoising unet output")
 
             latents = rearrange(latents, "b c f h w -> (b f) c h w")
 
-            loss_neigh = []
-            loss_sim = []
+            loss_align = []
+            loss_consist = []
             for i in range(len(latents)):
-                loss_sim.append(F.mse_loss(latents[i], ref_image_latents_ori))
+                loss_align.append(F.mse_loss(latents[i].unsqueeze(0), ref_image_latents_ori))
                 for j in range(i+1, len(latents)):
-                    loss_neigh.append(F.mse_loss(latents[i], latents[j]))
+                    loss_consist.append(F.mse_loss(latents[i], latents[j]))
 
-            loss_sim = sum(loss_sim) / len(loss_sim)
-            loss_neigh = sum(loss_neigh) / len(loss_neigh)
+            loss_align = sum(loss_align) / len(loss_align)
+            loss_consist = sum(loss_consist) / len(loss_consist)
 
             loss_lpips = self.lpips(x, x + delta)
             loss_lpips = max(loss_lpips - self.eps, 0)
-            #get_memory_cost(self.gpu_id, "Compute lpips loss")
 
-            loss_embd = loss_clip + loss_vae
             loss_ensemble = loss_ref + loss_app + loss_appctrl
-            loss_consist = loss_sim + loss_neigh
+            loss_frame = loss_align + loss_consist
 
             alpha1, alpha2, alpha3, alpha4 = 10, 100, 1, 10
-            loss = alpha1 * loss_embd + alpha2 * loss_ensemble + alpha3 * loss_consist - alpha4 * loss_lpips
-            pbar.set_description(f"[Running attack]: Clip Loss {loss_clip.item():.5f} | Vae Loss {loss_vae.item():.5f} | Ref Loss {loss_ref.item():.5f} | App Loss {loss_app.item():.5f} | AppCtrl Loss {loss_appctrl.item():.5f} | Sim Loss {loss_sim.item():.5f} | Neigh Loss {loss_neigh.item():.5f} | Lpips Loss {loss_lpips.item():.5f}")
+            loss = alpha1 * loss_vae + alpha1 * loss_clip + alpha2 * loss_ensemble + alpha3 * loss_frame - alpha4 * loss_lpips
+            pbar.set_description(f"[Running attack]: Vae Loss {loss_vae.item():.5f} | Clip Loss {loss_clip.item():.5f} | Ref Loss {loss_ref.item():.5f} | App Loss {loss_app.item():.5f} | AppCtrl Loss {loss_appctrl.item():.5f} | Align Loss {loss_align.item():.5f} | Consist Loss {loss_consist.item():.5f} | Lpips Loss {loss_lpips.item():.5f}")
 
             grad = torch.autograd.grad(loss, [delta])[0]
             grad = grad / torch.mean(torch.abs(grad), dim=(1, 2, 3), keepdim=True)
@@ -241,12 +226,11 @@ class linfpgdattack():
             delta.data = torch.clamp(delta.data, -self.eps, self.eps)
             delta.data = torch.clamp(x.data + delta.data, self.clip_min, self.clip_max) - x.data
 
-            del loss, loss_clip, loss_vae, loss_ref, loss_sim, loss_neigh, loss_lpips, loss_app, loss_appctrl, loss_ensemble, loss_consist, clip_image_embeds, reference_features, ref_image_latents, encoder_hidden_states, uncond_encoder_hidden_states, latents, x_adv_trans, grad, appearance_features, appearance_features_ori, appearance_control_features, appearance_control_features_ori
-            gc.collect()
-            torch.cuda.empty_cache()
             clear_reference(self.reference_unet)
             clear_reference(self.denoising_unet)
-            #get_memory_cost(self.gpu_id, "After backward")
+            del loss, loss_clip, loss_vae, loss_ref, loss_align, loss_consist, loss_lpips, loss_app, loss_appctrl, loss_ensemble, loss_frame, clip_image_embeds, reference_features, ref_image_latents, encoder_hidden_states, uncond_encoder_hidden_states, latents, x_adv_trans, grad, appearance_features, appearance_features_ori, appearance_control_features, appearance_control_features_ori
+            gc.collect()
+            torch.cuda.empty_cache()
 
         x_adv = torch.clamp(x + delta, self.clip_min, self.clip_max)
         return x_adv
@@ -259,7 +243,6 @@ def prepare_extra_step_kwargs(scheduler, generator, eta = 0.0):
     if accepts_eta:
         extra_step_kwargs["eta"] = eta
 
-    # check if the scheduler accepts generator
     accepts_generator = "generator" in set(
         inspect.signature(scheduler.step).parameters.keys()
     )
@@ -292,12 +275,10 @@ def get_text_embeddings(device, do_classifier_free_guidance, prompt=[''], negati
         )
         text_embeddings = text_embeddings[0]
 
-        # duplicate text embeddings for each generation per prompt, using mps friendly method
         bs_embed, seq_len, _ = text_embeddings.shape
         text_embeddings = text_embeddings.repeat(1, num_videos_per_prompt, 1)
         text_embeddings = text_embeddings.view(bs_embed * num_videos_per_prompt, seq_len, -1)
 
-        # get unconditional embeddings for classifier free guidance
         if do_classifier_free_guidance:
             uncond_tokens: List[str]
             if negative_prompt is None:
@@ -338,25 +319,23 @@ def get_text_embeddings(device, do_classifier_free_guidance, prompt=[''], negati
             )
             uncond_embeddings = uncond_embeddings[0]
 
-            # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
             seq_len = uncond_embeddings.shape[1]
             uncond_embeddings = uncond_embeddings.repeat(1, num_videos_per_prompt, 1)
             uncond_embeddings = uncond_embeddings.view(batch_size * num_videos_per_prompt, seq_len, -1)
 
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
             text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 
         return text_embeddings
 
     from transformers import CLIPTextModel, CLIPTokenizer
-    tokenizer = CLIPTokenizer.from_pretrained("../../../data/models/SD-1-5/", subfolder="tokenizer")
-    text_encoder = CLIPTextModel.from_pretrained("../../../data/models/SD-1-5/", subfolder="text_encoder").to(dtype=torch.float16, device=device)
+    tokenizer = CLIPTokenizer.from_pretrained("./pretrained_weights/stable-diffusion-v1-5", subfolder="tokenizer")
+    text_encoder = CLIPTextModel.from_pretrained("./pretrained_weights/stable-diffusion-v1-5", subfolder="text_encoder").to(dtype=torch.float16, device=device)
     text_embeddings = encode_prompt(
             prompt, device, num_videos_per_prompt, do_classifier_free_guidance, negative_prompt, tokenizer, text_encoder
         )
 
     del tokenizer
     del text_encoder
+    gc.collect()
+    torch.cuda.empty_cache()
     return text_embeddings
