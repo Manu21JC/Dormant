@@ -12,9 +12,9 @@ Before running the protection, download the following pretrained weights:
   - [DWPose](https://github.com/IDEA-Research/DWPose?tab=readme-ov-file#-dwpose-for-controlnet) (`yolox_l.onnx` and `dw-ll_ucoco_384.onnx`)
   - [AnimateAnyone](https://huggingface.co/patrolli/AnimateAnyone) (`denoising_unet.pth`, `reference_unet.pth`, `pose_guider.pth`, `motion_module.pth`)
   - [MagicAnimate](https://huggingface.co/zcxu-eric/MagicAnimate/tree/main/appearance_encoder) (`appearance_encoder/`)
-  - [MagicPose](https://github.com/Boese0601/MagicDance#getting-started) (`model_state-110000.th`)
+  - [MagicPose](https://drive.google.com/file/d/1UrkXykGC45NgoOoc_IteIW5e2wPphLxQ/view?usp=sharing) (`model_state-110000.th`)
   - Base models:
-    - [stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5)
+    - [stable-diffusion-v1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5)
     - [sd-vae-ft-mse](https://huggingface.co/stabilityai/sd-vae-ft-mse)
     - [sd-image-variations-diffusers](https://huggingface.co/lambdalabs/sd-image-variations-diffusers)
 
